@@ -187,8 +187,12 @@ void incOppPoint() {
 void updateOpponent() {
   if (millis() - oppLastInputTime < OPP_INPUT_DELAY) return;
   oppLastInputTime = millis();
-
-  paddleMove(&oppPaddle, (oppPaddle.position.x < ball.position.x));
+  if (oppPaddle.position.x - oppPaddle.length/2 > ball.position.x + ball.radius) {
+    paddleMove(&oppPaddle, false);
+  } else
+  if (oppPaddle.position.x + oppPaddle.length/2 < ball.position.x - ball.radius) {
+    paddleMove(&oppPaddle, true);
+  }
 }
 
 void updatePhysics() {
