@@ -8,11 +8,13 @@
 #define PADDLE_LENGTH 30
 #define PADDLE_COLOUR TFT_WHITE
 #define PADDLE_SPEED 10
+#define OPP_SPEED_MULT 1.15
 
-#define STARTING_SPEED 0.5
+#define STARTING_SPEED 0.25
 #define BALL_COLOUR TFT_WHITE
 #define BALL_RADIUS 10
 #define BALL_COLLISION_PADDING 4
+#define RESTITUTION 1.05
 
 #define POINT_PADDING_X 8
 #define POINT_PADDING_Y 16
@@ -25,7 +27,9 @@ TFT_eSPI tft = TFT_eSPI();
 
 #define DEBOUNCE_TIME 50
 #define MAX_BOTH_TIME 1000
+#define BOUNCE_DEBOUNCE 100
 unsigned long debounceTime;
+unsigned long bounceDebTime;
 
 typedef enum {
   NONE, LEFT, RIGHT, BOTH
@@ -54,6 +58,7 @@ typedef struct {
   IntVector past_position;
   IntVector position;
   int length;
+  float speed;
 } Paddle;
 
 int playerPoint = 0;
@@ -94,17 +99,15 @@ void rButtonPressed() {
 }
 
 void rightAction() {
-  playerPaddle.past_position = playerPaddle.position;
-  playerPaddle.position = (IntVector){min(playerPaddle.position.x + PADDLE_SPEED, tft.width() - 1 - playerPaddle.length/2), playerPaddle.position.y};
+  paddleMove(&playerPaddle, true);
 }
 
 void leftAction() {
-  playerPaddle.past_position = playerPaddle.position;
-  playerPaddle.position = (IntVector){max(playerPaddle.position.x - PADDLE_SPEED, 1 + playerPaddle.length/2), playerPaddle.position.y};
+  paddleMove(&playerPaddle, false);
 }
 
 void bothAction() {
-  initialise();
+  initialise(true);
 }
 
 void drawMidline() {
@@ -140,6 +143,16 @@ void drawPaddle(Paddle paddle) {
   tft.drawFastHLine(paddle.position.x - paddle.length/2, paddle.position.y, paddle.length, BACKGROUND_FOREGROUND_COLOUR);
 }
 
+void paddleMove(Paddle* paddle, bool isRight) {
+  if (isRight) {
+    paddle->past_position = paddle->position;
+    paddle->position = (IntVector){min((int)(paddle->position.x + paddle->speed), tft.width() - 1 - paddle->length/2), paddle->position.y};
+    return;
+  }
+  paddle->past_position = paddle->position;
+  paddle->position = (IntVector){max((int)(paddle->position.x - paddle->speed), 1 + paddle->length/2), paddle->position.y};
+}
+
 void drawPaddles() {
   drawPaddle(oppPaddle);
   drawPaddle(playerPaddle);
@@ -160,40 +173,77 @@ void updateForeground() {
   drawBall();
 }
 
+void incPlayerPoint() {
+  playerPoint ++;
+}
+
+void incOppPoint() {
+  oppPoint ++;
+}
+
 void updatePhysics() {
   ball.past_position = ball.position;
   ball.position = (FloatVector){ball.position.x + ball.velocity.x, ball.position.y + ball.velocity.y};
+  
+  bool bounceX = false;
+  bool bounceY = false;
 
-  if ((ball.position.x + ball.radius >= tft.width() - 3 - BALL_COLLISION_PADDING) || (ball.position.x - ball.radius <= 2 + BALL_COLLISION_PADDING)) {
-    ball.velocity = (FloatVector){-ball.velocity.x, ball.velocity.y};
+  if ((ball.position.x + ball.radius >= tft.width() - 2 - BALL_COLLISION_PADDING) || (ball.position.x - ball.radius <= 1 + BALL_COLLISION_PADDING)) {
+    bounceX = true;
   }
 
-  if ( (((ball.position.y + ball.radius >= playerPaddle.position.y - 1) && ((ball.position.x - ball.radius >= playerPaddle.position.x - playerPaddle.length/2) && (ball.position.x + ball.radius <= playerPaddle.position.x + playerPaddle.length/2))) || ((ball.position.y - ball.radius <= oppPaddle.position.y + 1) && ((ball.position.x - ball.radius >= oppPaddle.position.x - oppPaddle.length/2) && (ball.position.x + ball.radius <= oppPaddle.position.x + oppPaddle.length/2))))  || (((ball.position.y + ball.radius >= tft.height() - 3 - BALL_COLLISION_PADDING) || (ball.position.y - ball.radius <= 2 + BALL_COLLISION_PADDING)))) {
-    ball.velocity = (FloatVector){ball.velocity.x, -ball.velocity.y};
+  
+  if ((ball.position.y + ball.radius >= playerPaddle.position.y - 1)
+  && (ball.position.x - ball.radius >= playerPaddle.position.x - playerPaddle.length - BALL_COLLISION_PADDING)
+  && (ball.position.x + ball.radius <= playerPaddle.position.x + playerPaddle.length + BALL_COLLISION_PADDING)) {
+    bounceY = true;
+  }
+  if ((ball.position.y - ball.radius <= oppPaddle.position.y + 1)
+  && (ball.position.x - ball.radius >= oppPaddle.position.x - oppPaddle.length - BALL_COLLISION_PADDING)
+  && (ball.position.x + ball.radius <= oppPaddle.position.x + oppPaddle.length + BALL_COLLISION_PADDING)) {
+    bounceY = true;
+  }
+
+  if ((ball.position.y + ball.radius >= tft.height() - 2 - BALL_COLLISION_PADDING) && !bounceY) {
+    incOppPoint();
+    initialise(false);
+  }
+  if ((ball.position.y - ball.radius <= 1 + BALL_COLLISION_PADDING) && !bounceY) {
+    incPlayerPoint();
+    initialise(false);
+  }
+
+  if ((bounceY || bounceX) && (millis() - bounceDebTime >= BOUNCE_DEBOUNCE)) {
+    bounceDebTime = millis();
+    ball.velocity = (FloatVector){bounceX ? -ball.velocity.x : ball.velocity.x, bounceY ? -RESTITUTION*ball.velocity.y : ball.velocity.y};
   }
 
   ball.position = (FloatVector){ball.past_position.x + ball.velocity.x, ball.past_position.y + ball.velocity.y};
 }
 
-void initialise() {
+void initialise(bool resetPoints) {
   drawBackground();
 
   playerPaddle.position = (IntVector){tft.width()/2, tft.height() - 2 - PADDLE_PADDING};
   playerPaddle.past_position = playerPaddle.position;
   playerPaddle.length = PADDLE_LENGTH;
+  playerPaddle.speed = PADDLE_SPEED;
 
   oppPaddle.position = (IntVector){tft.width()/2, 1 + PADDLE_PADDING};
   oppPaddle.past_position = oppPaddle.position;
   oppPaddle.length = PADDLE_LENGTH;
+  oppPaddle.speed = PADDLE_SPEED*OPP_SPEED_MULT;
 
   ball.position = (FloatVector){tft.width()/2, tft.height()/2};
   ball.past_position = ball.position;
-  ball.velocity = (FloatVector){((float)random(-75, 75))/100,((float)random(-100, 100))/100};
+  ball.velocity = (FloatVector){((float)random(-25, 25)),((float)random(-100, 100))};
   ball.velocity = (FloatVector){STARTING_SPEED*ball.velocity.x/sqrt(ball.velocity.x*ball.velocity.x + ball.velocity.y*ball.velocity.y), STARTING_SPEED*ball.velocity.y/sqrt(ball.velocity.x*ball.velocity.x + ball.velocity.y*ball.velocity.y)};
   ball.radius = BALL_RADIUS;
 
-  oppPoint = 0;
-  playerPoint = 0;
+  if (resetPoints) {
+    oppPoint = 0;
+    playerPoint = 0;
+  }
 }
 
 void setup() {
@@ -201,9 +251,10 @@ void setup() {
   tft.setRotation(0);
   
 
-  initialise();
+  initialise(true);
 
   debounceTime = millis();
+  bounceDebTime = debounceTime;
   attachInterrupt(digitalPinToInterrupt(L_BUTTON), lButtonPressed, RISING);
   attachInterrupt(digitalPinToInterrupt(R_BUTTON), rButtonPressed, RISING);
 }
