@@ -8,7 +8,10 @@
 #define PADDLE_LENGTH 30
 #define PADDLE_COLOUR TFT_WHITE
 #define PADDLE_SPEED 10
+
 #define OPP_SPEED_MULT 1.15
+#define OPP_INPUT_DELAY 50
+unsigned long oppLastInputTime;
 
 #define STARTING_SPEED 0.25
 #define BALL_COLOUR TFT_WHITE
@@ -181,6 +184,13 @@ void incOppPoint() {
   oppPoint ++;
 }
 
+void updateOpponent() {
+  if (millis() - oppLastInputTime < OPP_INPUT_DELAY) return;
+  oppLastInputTime = millis();
+
+  paddleMove(&oppPaddle, (oppPaddle.position.x < ball.position.x));
+}
+
 void updatePhysics() {
   ball.past_position = ball.position;
   ball.position = (FloatVector){ball.position.x + ball.velocity.x, ball.position.y + ball.velocity.y};
@@ -250,11 +260,12 @@ void setup() {
   tft.init();
   tft.setRotation(0);
   
-
+//  does initialising welcome not call main again? recursive class initialisation?
   initialise(true);
 
   debounceTime = millis();
   bounceDebTime = debounceTime;
+  oppLastInputTime = debounceTime;
   attachInterrupt(digitalPinToInterrupt(L_BUTTON), lButtonPressed, RISING);
   attachInterrupt(digitalPinToInterrupt(R_BUTTON), rButtonPressed, RISING);
 }
@@ -263,6 +274,7 @@ void loop() {
   updateBackground();
   updatePhysics();
   updateForeground();
+  updateOpponent();
 
   // tft.drawString(String(ball.velocity.x) + ", " + String(ball.velocity.y), 0, 0);
 
